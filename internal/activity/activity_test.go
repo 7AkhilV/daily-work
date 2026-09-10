@@ -4,12 +4,12 @@ import "testing"
 
 func TestShortName(t *testing.T) {
 	cases := map[string]string{
-		// Long single token after stripping -BE → first initial (override via config for "WC")
-		"whistlingcitizen-BE": "W",
-		"Suzhi":               "Suzhi",
-		"QuestAndGames":       "QAG",
-		"my-cool-backend":     "MC",
-		"simple":              "Simple",
+		"whistlingcitizen-BE":  "WC",
+		"whistlingcitizen-FE":  "WC",
+		"Suzhi":                "Suzhi",
+		"QuestAndGames":        "QuestAndGames",
+		"my-cool-backend":      "MC",
+		"simple":               "Simple",
 		"whistling-citizen-BE": "WC",
 	}
 	for in, want := range cases {

@@ -9,17 +9,17 @@ import (
 func TestFormatSummary(t *testing.T) {
 	day := time.Date(2026, 9, 10, 0, 0, 0, 0, time.Local)
 	out := FormatSummary(day, []WorkItem{
-		{Text: "Suzhi: Gallery API"},
-		{Text: "- WC: Fixed chat"},
+		{Text: "Suzhi: Gallery API done"},
+		{Text: "WC: Fixed chat"},
 	})
 	if !strings.HasPrefix(out, "10-09-2026\n") {
 		t.Fatalf("unexpected date header: %q", out)
 	}
-	if !strings.Contains(out, "- Suzhi: Gallery API\n") {
-		t.Fatalf("missing first bullet: %q", out)
+	if strings.Contains(out, "- ") {
+		t.Fatalf("should not use markdown dashes: %q", out)
 	}
-	if !strings.Contains(out, "- WC: Fixed chat\n") {
-		t.Fatalf("missing second bullet: %q", out)
+	if !strings.Contains(out, "Suzhi: Gallery API done\n") {
+		t.Fatalf("missing first line: %q", out)
 	}
 }
 

@@ -151,8 +151,8 @@ func (o *OllamaProvider) Summarize(ctx context.Context, input ActivityInput) ([]
 		Stream: false,
 		Format: "json",
 		Options: map[string]any{
-			"temperature": 0.2,
-			"num_predict": 512, // keep output small — faster, less RAM
+			"temperature": 0.3,
+			"num_predict": 1024,
 		},
 	})
 

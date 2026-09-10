@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// WorkItem is one bullet in the daily summary.
+// WorkItem is one line in the daily summary.
 type WorkItem struct {
-	Text       string `json:"text"`
-	Project    string `json:"project,omitempty"`
-	Manual     bool   `json:"manual,omitempty"`
-	Edited     bool   `json:"edited,omitempty"`
-	SourceIDs  []string `json:"source_ids,omitempty"`
+	Text      string   `json:"text"`
+	Project   string   `json:"project,omitempty"`
+	Manual    bool     `json:"manual,omitempty"`
+	Edited    bool     `json:"edited,omitempty"`
+	SourceIDs []string `json:"source_ids,omitempty"`
 }
 
 // FormatDate returns DD-MM-YYYY for display.
@@ -20,18 +20,18 @@ func FormatDate(t time.Time) string {
 	return t.Format("02-01-2006")
 }
 
-// FormatSummary builds the clipboard/display text.
+// FormatSummary builds the clipboard text matching the user's Slack style
+// (date, blank line, plain lines — no leading "- ").
 func FormatSummary(date time.Time, items []WorkItem) string {
 	var b strings.Builder
 	b.WriteString(FormatDate(date))
 	b.WriteString("\n\n")
 	for _, item := range items {
 		line := strings.TrimSpace(item.Text)
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
 		if line == "" {
 			continue
-		}
-		if !strings.HasPrefix(line, "- ") {
-			line = "- " + line
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
@@ -39,15 +39,11 @@ func FormatSummary(date time.Time, items []WorkItem) string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-// DisplayLine returns the bullet line for UI.
+// DisplayLine returns the line for the interactive UI.
 func (w WorkItem) DisplayLine() string {
 	line := strings.TrimSpace(w.Text)
-	if line == "" {
-		return ""
-	}
-	if !strings.HasPrefix(line, "- ") {
-		return "- " + line
-	}
+	line = strings.TrimPrefix(line, "- ")
+	line = strings.TrimPrefix(line, "* ")
 	return line
 }
 
@@ -55,6 +51,7 @@ func (w WorkItem) DisplayLine() string {
 func ParseTaskInput(input string) string {
 	input = strings.TrimSpace(input)
 	input = strings.TrimPrefix(input, "- ")
+	input = strings.TrimPrefix(input, "* ")
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return ""

@@ -119,10 +119,14 @@ func summarize(ctx context.Context, cfg config.Config, proc *activity.ProcessedA
 
 func summarizeOnly(ctx context.Context, cfg config.Config, proc *activity.ProcessedActivity, day time.Time) ([]summary.WorkItem, error) {
 	provider := ai.NewOllama(cfg.AI.Host, cfg.AI.Model)
-	return provider.Summarize(ctx, ai.ActivityInput{
+	items, err := provider.Summarize(ctx, ai.ActivityInput{
 		Processed: proc,
 		DateLabel: summary.FormatDate(day),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return ai.PreferRichSummary(items, proc), nil
 }
 
 func parseDate(s string) (time.Time, error) {

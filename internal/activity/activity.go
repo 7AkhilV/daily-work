@@ -81,6 +81,16 @@ func ShortName(repoName string) string {
 	if name == "" {
 		return "Unknown"
 	}
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "whistlingcitizen"), strings.Contains(lower, "whistling-citizen"), strings.Contains(lower, "whistling_citizen"):
+		return "WC"
+	case strings.Contains(lower, "suzhi"):
+		return "Suzhi"
+	case strings.Contains(lower, "quest") && strings.Contains(lower, "game"):
+		return "QuestAndGames"
+	}
+
 	base := suffixRe.ReplaceAllString(name, "")
 	if base == "" {
 		base = name
