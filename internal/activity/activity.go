@@ -89,6 +89,9 @@ func ShortName(repoName string) string {
 		return "Suzhi"
 	case strings.Contains(lower, "quest") && strings.Contains(lower, "game"):
 		return "QuestAndGames"
+	case strings.Contains(lower, "chat"):
+		// Chat module work in this team is reported under WC
+		return "WC"
 	}
 
 	base := suffixRe.ReplaceAllString(name, "")

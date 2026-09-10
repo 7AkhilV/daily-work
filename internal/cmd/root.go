@@ -28,10 +28,11 @@ func NewRoot() *cobra.Command {
 		Long:  "Daily Work analyzes your GitHub activity and drafts a concise daily update using a local AI model (Ollama).",
 		RunE:  runDaily,
 	}
-	root.Flags().StringVar(&dateFlag, "date", "", "Date to summarize (YYYY-MM-DD). Defaults to today.")
+	root.PersistentFlags().StringVar(&dateFlag, "date", "", "Date (YYYY-MM-DD). Defaults to today.")
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newConfigCmd())
+	root.AddCommand(newActivityCmd())
 	return root
 }
 
@@ -66,13 +67,15 @@ func runDaily(cmd *cobra.Command, args []string) error {
 	fmt.Printf("✓ GitHub connected\n")
 	fmt.Printf("✓ Account: %s\n\n", client.Login())
 
-	dayAct, err := client.FetchDayActivity(ctx, day)
+	dayAct, err := client.FetchDayActivity(ctx, day, ghclient.FetchOptions{
+		IncludePersonalRepos: cfg.IncludePersonalRepos,
+	})
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("✓ Found %d commits\n", len(dayAct.Commits))
-	fmt.Printf("✓ Found %d pull requests\n", len(dayAct.PRs))
+	fmt.Printf("✓ Found %d pull requests (used only to discover extra commits)\n", len(dayAct.PRs))
 	fmt.Printf("✓ Found %d repositories\n\n", dayAct.RepoCount)
 
 	if len(dayAct.Commits) == 0 && len(dayAct.PRs) == 0 {
@@ -274,6 +277,7 @@ func newConfigCmd() *cobra.Command {
 			fmt.Printf("AI provider: %s\n", cfg.AI.Provider)
 			fmt.Printf("AI model:    %s\n", cfg.AI.Model)
 			fmt.Printf("Ollama host: %s\n", cfg.AI.Host)
+			fmt.Printf("Personal repos: %v\n", cfg.IncludePersonalRepos)
 			fmt.Println("Projects:")
 			if len(cfg.Projects) == 0 {
 				fmt.Println("  (none — short names are auto-derived)")
@@ -307,3 +311,62 @@ func newConfigCmd() *cobra.Command {
 	})
 	return cmd
 }
+
+func newActivityCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "activity",
+		Short: "List commits (and PRs) found for a day — no AI",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			day, err := parseDate(dateFlag)
+			if err != nil {
+				return err
+			}
+			pat, err := auth.GetGitHubPAT()
+			if err != nil {
+				return err
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			client, err := ghclient.NewClient(ctx, pat)
+			if err != nil {
+				return err
+			}
+			act, err := client.FetchDayActivity(ctx, day, ghclient.FetchOptions{
+				IncludePersonalRepos: cfg.IncludePersonalRepos,
+			})
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Date: %s\nUser: %s\n", summary.FormatDate(day), act.User)
+			if !cfg.IncludePersonalRepos {
+				fmt.Println("Filter: organization repos only (personal repos excluded)")
+			}
+			fmt.Println()
+			fmt.Printf("COMMITS (%d) — primary source for the summary\n", len(act.Commits))
+			if len(act.Commits) == 0 {
+				fmt.Println("(none found)")
+			}
+			for i, cm := range act.Commits {
+				sha := cm.SHA
+				if len(sha) > 7 {
+					sha = sha[:7]
+				}
+				flag := ""
+				if cm.IsMerge {
+					flag = " [merge]"
+				}
+				fmt.Printf("%d. [%s] %s%s\n   %s  %s\n\n", i+1, cm.RepoFull, cm.Message, flag, sha, cm.Timestamp.Local().Format("15:04"))
+			}
+			fmt.Printf("PULL REQUESTS (%d) — used only to discover commits on those PRs\n", len(act.PRs))
+			for i, pr := range act.PRs {
+				fmt.Printf("%d. [%s] #%d %s\n\n", i+1, pr.RepoFull, pr.Number, pr.Title)
+			}
+			return nil
+		},
+	}
+}
+

@@ -16,8 +16,9 @@ const (
 
 // Config is the on-disk configuration (no secrets).
 type Config struct {
-	AI       AIConfig          `yaml:"ai"`
-	Projects map[string]string `yaml:"projects"`
+	AI                   AIConfig          `yaml:"ai"`
+	Projects             map[string]string `yaml:"projects"`
+	IncludePersonalRepos bool              `yaml:"include_personal_repos"`
 }
 
 type AIConfig struct {

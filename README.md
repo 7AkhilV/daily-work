@@ -31,7 +31,10 @@ Classic GitHub PAT scopes: `repo`, `read:user`, `user:email`
 ```bash
 daily-work
 daily-work --date 2026-09-09
+daily-work activity              # list commits found (no AI)
 ```
+
+By default only **organization** repos are included (personal repos like this tool’s own repo are skipped).
 
 ---
 
