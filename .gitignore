@@ -1,0 +1,14 @@
+# .env is already ignored — keep secrets out of git
+.env
+.env.*
+*.pem
+
+# Binaries / build
+/bin/
+/dist/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

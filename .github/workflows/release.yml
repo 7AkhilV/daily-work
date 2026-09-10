@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Build binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="${GITHUB_REF_NAME}"
+          for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            os="${pair%/*}"
+            arch="${pair#*/}"
+            out="dist/daily-work-${os}-${arch}"
+            if [ "$os" = "windows" ]; then out="${out}.exe"; fi
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${version}" -o "$out" ./cmd/daily-work
+          done
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${version}" -o dist/daily-work-windows-amd64.exe ./cmd/daily-work
+          cd dist
+          shasum -a 256 daily-work-* > checksums.txt
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
