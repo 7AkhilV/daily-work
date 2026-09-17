@@ -25,7 +25,7 @@ func NewRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "daily-work",
 		Short: "Generate a daily work summary from GitHub activity",
-		Long:  "Daily Work analyzes your GitHub activity and drafts a concise daily update using a local AI model (Ollama).",
+		Long:  "Daily Work analyzes your GitHub activity and drafts a concise daily update using Gemini.",
 		RunE:  runDaily,
 	}
 	root.PersistentFlags().StringVar(&dateFlag, "date", "", "Date (YYYY-MM-DD). Defaults to today.")
@@ -46,6 +46,14 @@ func runDaily(cmd *cobra.Command, args []string) error {
 	pat, err := auth.GetGitHubPAT()
 	if err != nil {
 		fmt.Println("GitHub authentication required.")
+		fmt.Println()
+		fmt.Println("Run:")
+		fmt.Println()
+		fmt.Println("  daily-work auth")
+		return nil
+	}
+	if _, err := auth.GetGeminiKey(); err != nil {
+		fmt.Println("Gemini API key required.")
 		fmt.Println()
 		fmt.Println("Run:")
 		fmt.Println()
@@ -86,7 +94,7 @@ func runDaily(cmd *cobra.Command, args []string) error {
 
 	proc := activity.Process(dayAct, cfg.ProjectShortName)
 
-	fmt.Printf("Analyzing with local model %s...\n\n", cfg.AI.Model)
+	fmt.Printf("Analyzing with Gemini (%s)...\n\n", cfg.AI.Model)
 
 	items, usedFallback, err := summarize(ctx, cfg, proc, day)
 	if err != nil {
@@ -110,7 +118,7 @@ func runDaily(cmd *cobra.Command, args []string) error {
 func summarize(ctx context.Context, cfg config.Config, proc *activity.ProcessedActivity, day time.Time) ([]summary.WorkItem, bool, error) {
 	items, err := summarizeOnly(ctx, cfg, proc, day)
 	if err != nil {
-		fmt.Printf("⚠ Local AI unavailable:\n%v\n\n", err)
+		fmt.Printf("⚠ Gemini unavailable:\n%v\n\n", err)
 		fallback := ai.FallbackFromActivity(proc)
 		if len(fallback) == 0 {
 			return []summary.WorkItem{}, true, nil
@@ -121,7 +129,11 @@ func summarize(ctx context.Context, cfg config.Config, proc *activity.ProcessedA
 }
 
 func summarizeOnly(ctx context.Context, cfg config.Config, proc *activity.ProcessedActivity, day time.Time) ([]summary.WorkItem, error) {
-	provider := ai.NewOllama(cfg.AI.Host, cfg.AI.Model)
+	key, err := auth.GetGeminiKey()
+	if err != nil {
+		return nil, err
+	}
+	provider := ai.NewGemini(key, cfg.AI.Model)
 	items, err := provider.Summarize(ctx, ai.ActivityInput{
 		Processed: proc,
 		DateLabel: summary.FormatDate(day),
@@ -144,24 +156,31 @@ func parseDate(s string) (time.Time, error) {
 	return t, nil
 }
 
+func readHidden(prompt string) (string, error) {
+	fmt.Print(prompt)
+	b, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
 func newAuthCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "auth",
-		Short: "Save your GitHub Personal Access Token",
+		Short: "Save GitHub PAT and Gemini API key",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Daily Work — GitHub auth")
+			fmt.Println("Daily Work — auth")
 			fmt.Println(strings.Repeat("─", 40))
 			fmt.Println()
-			fmt.Println("Create a classic PAT at: https://github.com/settings/tokens")
-			fmt.Println("Scopes: repo, read:user, user:email")
+			fmt.Println("1) GitHub classic PAT: https://github.com/settings/tokens")
+			fmt.Println("   Scopes: repo, read:user, user:email")
 			fmt.Println()
-			fmt.Print("GitHub PAT (input hidden): ")
-			patBytes, err := term.ReadPassword(int(syscall.Stdin))
-			fmt.Println()
+			pat, err := readHidden("GitHub PAT (input hidden): ")
 			if err != nil {
 				return err
 			}
-			pat := strings.TrimSpace(string(patBytes))
 			if pat == "" {
 				return fmt.Errorf("PAT is required")
 			}
@@ -174,22 +193,36 @@ func newAuthCmd() *cobra.Command {
 			if err := auth.StoreGitHubPAT(pat); err != nil {
 				return err
 			}
-			fmt.Printf("✓ GitHub connected\n")
-			fmt.Printf("✓ Account: %s\n\n", client.Login())
+			fmt.Printf("✓ GitHub connected (%s)\n\n", client.Login())
+
+			fmt.Println("2) Gemini API key: https://aistudio.google.com/apikey")
+			fmt.Println()
+			key, err := readHidden("Gemini API key (input hidden): ")
+			if err != nil {
+				return err
+			}
+			if key == "" {
+				return fmt.Errorf("Gemini API key is required")
+			}
+			if err := auth.StoreGeminiKey(key); err != nil {
+				return err
+			}
+			fmt.Println("✓ Gemini key saved")
+			fmt.Println()
 
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-			cfg.AI.Provider = "ollama"
+			cfg.AI.Provider = "gemini"
 			cfg.AI.Model = config.DefaultModel
 			if err := config.Save(cfg); err != nil {
 				return err
 			}
 
-			fmt.Println("Next: set up the small local model (one-time, ~2GB):")
+			fmt.Println("You're set. Run:")
 			fmt.Println()
-			fmt.Println("  daily-work setup")
+			fmt.Println("  daily-work")
 			return nil
 		},
 	}
@@ -198,56 +231,38 @@ func newAuthCmd() *cobra.Command {
 func newSetupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
-		Short: "Check Ollama and show how to install llama3.2:3b (~2GB)",
+		Short: "Check GitHub + Gemini credentials",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-			cfg.AI.Provider = "ollama"
-			if cfg.AI.Model == "" || strings.HasPrefix(cfg.AI.Model, "gemini") {
+			cfg.AI.Provider = "gemini"
+			if cfg.AI.Model == "" || strings.HasPrefix(cfg.AI.Model, "llama") {
 				cfg.AI.Model = config.DefaultModel
 			}
 			_ = config.Save(cfg)
 
-			fmt.Println("Daily Work — Local AI setup")
+			fmt.Println("Daily Work — setup")
 			fmt.Println(strings.Repeat("─", 40))
 			fmt.Println()
-			fmt.Println("Uses only llama3.2:3b (~2GB) via Ollama — no cloud AI, no API keys.")
+			fmt.Printf("AI: Gemini (%s)\n\n", cfg.AI.Model)
+
+			if _, err := auth.GetGitHubPAT(); err != nil {
+				fmt.Println("✗ GitHub PAT missing")
+			} else {
+				fmt.Println("✓ GitHub PAT found")
+			}
+			if _, err := auth.GetGeminiKey(); err != nil {
+				fmt.Println("✗ Gemini API key missing")
+				fmt.Println()
+				fmt.Println("Get a free key: https://aistudio.google.com/apikey")
+				fmt.Println()
+				fmt.Println("Then run: daily-work auth")
+				return nil
+			}
+			fmt.Println("✓ Gemini API key found")
 			fmt.Println()
-
-			provider := ai.NewOllama(cfg.AI.Host, cfg.AI.Model)
-			ctx := context.Background()
-
-			if err := provider.Ping(ctx); err != nil {
-				fmt.Println("Ollama status: not running")
-				fmt.Println()
-				fmt.Println("Do this once:")
-				fmt.Println()
-				fmt.Println("  1) brew install ollama")
-				fmt.Println("  2) open -a Ollama   # or: ollama serve")
-				fmt.Println("  3) ollama pull llama3.2:3b")
-				fmt.Println("  4) daily-work setup   # re-check")
-				fmt.Println()
-				fmt.Println(err.Error())
-				return nil
-			}
-			fmt.Println("✓ Ollama is running")
-
-			ok, err := provider.HasModel(ctx)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				fmt.Printf("✗ Model %s not downloaded yet\n\n", cfg.AI.Model)
-				fmt.Println("Run once (~2GB, keep only this model to save disk):")
-				fmt.Println()
-				fmt.Printf("  ollama pull %s\n\n", cfg.AI.Model)
-				fmt.Println("Then re-run: daily-work setup")
-				return nil
-			}
-
-			fmt.Printf("✓ Model ready: %s\n\n", cfg.AI.Model)
 			fmt.Println("You're set. Run:")
 			fmt.Println()
 			fmt.Println("  daily-work")
@@ -276,7 +291,6 @@ func newConfigCmd() *cobra.Command {
 			fmt.Printf("Path: %s\n\n", path)
 			fmt.Printf("AI provider: %s\n", cfg.AI.Provider)
 			fmt.Printf("AI model:    %s\n", cfg.AI.Model)
-			fmt.Printf("Ollama host: %s\n", cfg.AI.Host)
 			fmt.Printf("Personal repos: %v\n", cfg.IncludePersonalRepos)
 			fmt.Println("Projects:")
 			if len(cfg.Projects) == 0 {
@@ -306,6 +320,24 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("✓ %s → %s\n", args[0], args[1])
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set-model [model]",
+		Short: "Set Gemini model (default gemini-3.5-flash)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			cfg.AI.Provider = "gemini"
+			cfg.AI.Model = args[0]
+			if err := config.Save(cfg); err != nil {
+				return err
+			}
+			fmt.Printf("✓ model → %s\n", args[0])
 			return nil
 		},
 	})
@@ -369,4 +401,3 @@ func newActivityCmd() *cobra.Command {
 		},
 	}
 }
-

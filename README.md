@@ -2,7 +2,7 @@
 
 CLI that turns your GitHub activity into a concise daily Slack update.
 
-Uses a **small local model only** (`llama3.2:3b` via Ollama) — no cloud AI keys.
+Uses **Gemini** (`gemini-3.5-flash`) for summarization.
 
 **Repo:** https://github.com/7AkhilV/daily-work
 
@@ -14,7 +14,7 @@ Uses a **small local model only** (`llama3.2:3b` via Ollama) — no cloud AI key
 curl -fsSL https://raw.githubusercontent.com/7AkhilV/daily-work/main/install.sh | bash
 ```
 
-That installs the latest release binary, sets up Ollama + `llama3.2:3b` (~2GB), and puts `daily-work` on your PATH.
+That installs the latest release binary and puts `daily-work` on your PATH.
 
 Update later by running the same command again.
 
@@ -24,7 +24,9 @@ Update later by running the same command again.
 daily-work auth
 ```
 
-Classic GitHub PAT scopes: `repo`, `read:user`, `user:email`
+You’ll save:
+- Classic GitHub PAT (`repo`, `read:user`, `user:email`)
+- Free Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
 
 ### Daily use
 
@@ -57,8 +59,8 @@ git clone git@github.com-personal:7AkhilV/daily-work.git
 ## Requirements
 
 - macOS or Linux
-- [Ollama](https://ollama.com) + `llama3.2:3b` (~2GB)
 - GitHub PAT (for fetching your activity)
+- Gemini API key (free from Google AI Studio)
 
 ## License
 

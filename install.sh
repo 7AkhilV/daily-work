@@ -2,7 +2,7 @@
 # Install Daily Work from GitHub Releases (no Go required).
 #
 # One-liner (after the repo is public):
-#   curl -fsSL https://raw.githubusercontent.com/<YOUR_USER>/daily-work/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/7AkhilV/daily-work/main/install.sh | bash
 #
 # From a clone (dev / fallback build):
 #   ./install.sh --from-source
@@ -14,7 +14,6 @@ GITHUB_REPO="${DAILY_WORK_GITHUB_REPO:-daily-work}"
 # -----------------------------------------------------------------------
 
 APP="daily-work"
-MODEL="llama3.2:3b"
 BIN_DIR="${HOME}/.local/bin"
 INSTALL_PATH="${BIN_DIR}/${APP}"
 FROM_SOURCE=0
@@ -109,49 +108,14 @@ install_from_source() {
   green "✓ Installed ${INSTALL_PATH} (from source)"
 }
 
-setup_ollama() {
-  blue "→ Local AI (Ollama + ${MODEL}, ~2GB)..."
-  if ! command -v ollama >/dev/null 2>&1; then
-    if command -v brew >/dev/null 2>&1; then
-      yellow "Installing Ollama via Homebrew..."
-      brew install ollama
-    else
-      red "Install Ollama from https://ollama.com then re-run install."
-      exit 1
-    fi
-  fi
-  if ! curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-    yellow "Starting Ollama..."
-    [[ "$(uname -s)" == "Darwin" ]] && open -a Ollama >/dev/null 2>&1 || true
-    if ! curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-      nohup ollama serve >/dev/null 2>&1 &
-    fi
-    for _ in $(seq 1 30); do
-      curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1 && break
-      sleep 1
-    done
-  fi
-  if ! curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-    red "Ollama is not reachable. Open the Ollama app, then: ollama pull ${MODEL}"
-    exit 1
-  fi
-  green "✓ Ollama running"
-  if ollama list 2>/dev/null | awk '{print $1}' | grep -qx "${MODEL}"; then
-    green "✓ Model present: ${MODEL}"
-  else
-    yellow "Downloading ${MODEL} (~2GB, one-time)..."
-    ollama pull "${MODEL}"
-    green "✓ Model ready"
-  fi
-}
-
 print_next() {
   echo
   green "Daily Work installed."
   echo
-  echo "Once:  ${APP} auth"
+  echo "Once:  ${APP} auth   # GitHub PAT + Gemini API key"
   echo "Daily: ${APP}"
   echo
+  echo "Gemini key: https://aistudio.google.com/apikey"
   echo "Update later: re-run this install script (fetches newest release)."
 }
 
@@ -165,8 +129,6 @@ main() {
   else
     install_from_release
   fi
-  setup_ollama
-  "${INSTALL_PATH}" setup >/dev/null 2>&1 || true
   print_next
 }
 

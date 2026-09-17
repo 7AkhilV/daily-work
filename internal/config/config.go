@@ -11,7 +11,7 @@ import (
 
 const (
 	AppName      = "daily-work"
-	DefaultModel = "llama3.2:3b"
+	DefaultModel = "gemini-3.5-flash"
 )
 
 // Config is the on-disk configuration (no secrets).
@@ -24,15 +24,13 @@ type Config struct {
 type AIConfig struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
-	Host     string `yaml:"host,omitempty"` // Ollama host, default localhost
 }
 
 func Default() Config {
 	return Config{
 		AI: AIConfig{
-			Provider: "ollama",
+			Provider: "gemini",
 			Model:    DefaultModel,
-			Host:     "http://localhost:11434",
 		},
 		Projects: map[string]string{},
 	}
@@ -70,15 +68,12 @@ func Load() (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config: %w", err)
 	}
-	// Force local-only defaults if missing or still on old Gemini settings.
-	if cfg.AI.Provider == "" || cfg.AI.Provider == "gemini" {
-		cfg.AI.Provider = "ollama"
+	// Migrate away from removed Ollama defaults.
+	if cfg.AI.Provider == "" || cfg.AI.Provider == "ollama" {
+		cfg.AI.Provider = "gemini"
 	}
-	if cfg.AI.Model == "" || strings.HasPrefix(cfg.AI.Model, "gemini") {
+	if cfg.AI.Model == "" || strings.HasPrefix(cfg.AI.Model, "llama") || cfg.AI.Model == "gemini-2.0-flash" {
 		cfg.AI.Model = DefaultModel
-	}
-	if cfg.AI.Host == "" {
-		cfg.AI.Host = "http://localhost:11434"
 	}
 	if cfg.Projects == nil {
 		cfg.Projects = map[string]string{}
