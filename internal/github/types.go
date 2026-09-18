@@ -44,9 +44,11 @@ type PullRequestActivity struct {
 }
 
 type DayActivity struct {
-	User      string
-	Date      time.Time
-	Commits   []CommitActivity
-	PRs       []PullRequestActivity
-	RepoCount int
+	User         string
+	Date         time.Time
+	Commits      []CommitActivity
+	PRs          []PullRequestActivity
+	RepoCount    int
+	Orgs         []string
+	CheckedRepos []string
 }

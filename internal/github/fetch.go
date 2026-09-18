@@ -15,6 +15,7 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 	if err != nil {
 		emails = nil
 	}
+	emails = appendNoreplyEmails(emails, login, c.user.GetID())
 
 	seen := map[string]struct{}{}
 	var commits []CommitActivity
@@ -60,17 +61,54 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 		}
 	}
 
+	for _, org := range c.orgLogins(ctx) {
+		found, err = c.searchCommits(ctx, fmt.Sprintf("author:%s org:%s", login, org), start, end)
+		if err != nil {
+			continue
+		}
+		for _, cm := range found {
+			addCommit(cm)
+		}
+	}
+
 	for _, cm := range c.commitsFromEvents(ctx, login, start, end) {
 		addCommit(cm)
 	}
 
-	for _, pair := range c.recentlyPushedRepos(ctx, start) {
+	candidates, orgs := c.candidateRepos(ctx, start)
+	var checked []string
+	prSeen := map[string]struct{}{}
+	var filteredPRs []PullRequestActivity
+	addPR := func(pr PullRequestActivity) {
+		key := pr.RepoFull + "#" + fmt.Sprintf("%d", pr.Number)
+		if _, ok := prSeen[key]; ok {
+			return
+		}
+		prSeen[key] = struct{}{}
+		filteredPRs = append(filteredPRs, pr)
+	}
+
+	for _, pair := range candidates {
 		owner, name := pair[0], pair[1]
 		if !opts.IncludePersonalRepos && !c.allowRepo(ctx, owner, name) {
 			continue
 		}
-		for _, cm := range c.commitsFromRepo(ctx, owner, name, login, start, end) {
+		checked = append(checked, owner+"/"+name)
+		for _, cm := range c.commitsFromRepoEvents(ctx, owner, name, login, start, end) {
 			addCommit(cm)
+		}
+		for _, cm := range c.commitsFromRepoBranches(ctx, owner, name, login, emails, start, end) {
+			addCommit(cm)
+		}
+		for _, pr := range c.recentPRs(ctx, owner, name, start, end) {
+			hadCommit := false
+			for _, cm := range c.commitsFromPR(ctx, owner, name, pr.Number, login, emails, start, end) {
+				addCommit(cm)
+				hadCommit = true
+			}
+			if hadCommit || inWindow(pr.CreatedAt, start, end) {
+				addPR(pr)
+			}
 		}
 	}
 
@@ -78,7 +116,6 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 	if err != nil {
 		prs = nil
 	}
-	var filteredPRs []PullRequestActivity
 	for _, pr := range prs {
 		owner, _ := splitFullName(pr.RepoFull)
 		if !opts.IncludePersonalRepos && !c.allowRepo(ctx, owner, pr.RepoName) {
@@ -89,10 +126,8 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 			addCommit(cm)
 			hadCommit = true
 		}
-		// Keep PRs only when they contribute today's work. Yesterday's leftover
-		// PRs (common with UTC date search) must not become today's summary.
 		if hadCommit || inWindow(pr.CreatedAt, start, end) {
-			filteredPRs = append(filteredPRs, pr)
+			addPR(pr)
 		}
 	}
 	prs = filteredPRs
@@ -119,10 +154,12 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 	}
 
 	return &DayActivity{
-		User:      login,
-		Date:      start,
-		Commits:   commits,
-		PRs:       prs,
-		RepoCount: len(repos),
+		User:         login,
+		Date:         start,
+		Commits:      commits,
+		PRs:          prs,
+		RepoCount:    len(repos),
+		Orgs:         orgs,
+		CheckedRepos: checked,
 	}, nil
 }

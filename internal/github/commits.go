@@ -74,7 +74,7 @@ func commitFromSearch(item *github.CommitResult, start, end time.Time) *CommitAc
 
 func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end time.Time) []CommitActivity {
 	var out []CommitActivity
-	out = append(out, c.paginatePushEvents(start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+	out = append(out, c.paginatePushEvents(login, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 		return c.gh.Activity.ListEventsPerformedByUser(ctx, login, false, opts)
 	})...)
 
@@ -88,14 +88,14 @@ func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end
 		if name == "" {
 			continue
 		}
-		out = append(out, c.paginatePushEvents(start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+		out = append(out, c.paginatePushEvents(login, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 			return c.gh.Activity.ListUserEventsForOrganization(ctx, name, login, opts)
 		})...)
 	}
 	return out
 }
 
-func (c *Client) paginatePushEvents(start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
+func (c *Client) paginatePushEvents(login string, start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
 	opts := &github.ListOptions{PerPage: 100}
 	var out []CommitActivity
 	pages := 0
@@ -113,6 +113,10 @@ func (c *Client) paginatePushEvents(start, end time.Time, list func(*github.List
 				break
 			}
 			if !inWindow(created, start, end) {
+				continue
+			}
+			if login != "" && ev.GetActor() != nil && ev.GetActor().GetLogin() != "" &&
+				!strings.EqualFold(ev.GetActor().GetLogin(), login) {
 				continue
 			}
 			out = append(out, commitsFromPushEvent(ev, created)...)
@@ -209,12 +213,16 @@ func (c *Client) commitsFromPR(ctx context.Context, owner, repo string, number i
 	return out
 }
 
-func (c *Client) commitsFromRepo(ctx context.Context, owner, repo, login string, start, end time.Time) []CommitActivity {
-	if owner == "" || repo == "" || login == "" {
+func (c *Client) commitsFromRepo(ctx context.Context, owner, repo, login string, emails []string, start, end time.Time, ref string) []CommitActivity {
+	if owner == "" || repo == "" {
 		return nil
 	}
+	emailSet := map[string]bool{}
+	for _, e := range emails {
+		emailSet[strings.ToLower(e)] = true
+	}
 	opts := &github.CommitsListOptions{
-		Author:      login,
+		SHA:         ref,
 		Since:       start,
 		Until:       end,
 		ListOptions: github.ListOptions{PerPage: 100},
@@ -226,11 +234,175 @@ func (c *Client) commitsFromRepo(ctx context.Context, owner, repo, login string,
 			return out
 		}
 		for _, item := range list {
+			if login != "" && !commitByUser(item, login, emailSet) {
+				continue
+			}
 			if cm := commitFromRepo(item, owner, repo, start, end); cm != nil {
 				out = append(out, *cm)
 			}
 		}
 		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return out
+}
+
+func (c *Client) commitsFromRepoBranches(ctx context.Context, owner, repo, login string, emails []string, start, end time.Time) []CommitActivity {
+	var out []CommitActivity
+	out = append(out, c.commitsFromRepo(ctx, owner, repo, login, emails, start, end, "")...)
+
+	opts := &github.BranchListOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	branches, _, err := c.gh.Repositories.ListBranches(ctx, owner, repo, opts)
+	if err != nil {
+		return out
+	}
+	seen := map[string]struct{}{"": {}}
+	for _, b := range branches {
+		name := b.GetName()
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, c.commitsFromRepo(ctx, owner, repo, login, emails, start, end, name)...)
+	}
+	return out
+}
+
+func (c *Client) commitsFromRepoEvents(ctx context.Context, owner, repo, login string, start, end time.Time) []CommitActivity {
+	return c.paginatePushEvents(login, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+		return c.gh.Activity.ListRepositoryEvents(ctx, owner, repo, opts)
+	})
+}
+
+func (c *Client) recentPRs(ctx context.Context, owner, repo string, start, end time.Time) []PullRequestActivity {
+	if owner == "" || repo == "" {
+		return nil
+	}
+	opts := &github.PullRequestListOptions{
+		State:       "all",
+		Sort:        "updated",
+		Direction:   "desc",
+		ListOptions: github.ListOptions{PerPage: 30},
+	}
+	list, _, err := c.gh.PullRequests.List(ctx, owner, repo, opts)
+	if err != nil {
+		return nil
+	}
+	full := owner + "/" + repo
+	var out []PullRequestActivity
+	for _, pr := range list {
+		updated := pr.GetUpdatedAt().Time
+		created := pr.GetCreatedAt().Time
+		if updated.Before(start) && created.Before(start) {
+			break
+		}
+		if !inWindow(updated, start, end) && !inWindow(created, start, end) {
+			continue
+		}
+		body := pr.GetBody()
+		if len(body) > 800 {
+			body = body[:800] + "..."
+		}
+		out = append(out, PullRequestActivity{
+			Number:    pr.GetNumber(),
+			Title:     pr.GetTitle(),
+			Body:      body,
+			RepoFull:  full,
+			RepoName:  repo,
+			URL:       pr.GetHTMLURL(),
+			CreatedAt: created,
+			UpdatedAt: updated,
+		})
+	}
+	return out
+}
+
+func (c *Client) orgLogins(ctx context.Context) []string {
+	orgs, _, err := c.gh.Organizations.List(ctx, "", &github.ListOptions{PerPage: 100})
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, org := range orgs {
+		if name := org.GetLogin(); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func (c *Client) candidateRepos(ctx context.Context, start time.Time) ([][2]string, []string) {
+	seen := map[string]struct{}{}
+	var out [][2]string
+	add := func(owner, name string) {
+		owner = strings.TrimSpace(owner)
+		name = strings.TrimSpace(name)
+		if owner == "" || name == "" {
+			return
+		}
+		key := strings.ToLower(owner + "/" + name)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, [2]string{owner, name})
+	}
+	for _, pair := range c.recentlyPushedRepos(ctx, start) {
+		add(pair[0], pair[1])
+	}
+	orgs := c.orgLogins(ctx)
+	for _, org := range orgs {
+		for _, pair := range c.orgReposPushedSince(ctx, org, start) {
+			add(pair[0], pair[1])
+		}
+	}
+	return out, orgs
+}
+
+func (c *Client) orgReposPushedSince(ctx context.Context, org string, start time.Time) [][2]string {
+	if org == "" {
+		return nil
+	}
+	opts := &github.RepositoryListByOrgOptions{
+		Sort:        "pushed",
+		Direction:   "desc",
+		ListOptions: github.ListOptions{PerPage: 50},
+	}
+	var out [][2]string
+	pages := 0
+	for {
+		repos, resp, err := c.gh.Repositories.ListByOrg(ctx, org, opts)
+		if err != nil {
+			return out
+		}
+		pages++
+		stop := false
+		for _, r := range repos {
+			if !r.GetPushedAt().Time.IsZero() && r.GetPushedAt().Time.Before(start) {
+				stop = true
+				break
+			}
+			name := r.GetName()
+			owner := org
+			if r.Owner != nil && r.Owner.GetLogin() != "" {
+				owner = r.Owner.GetLogin()
+			}
+			if name == "" {
+				continue
+			}
+			out = append(out, [2]string{owner, name})
+			if len(out) >= 20 {
+				stop = true
+				break
+			}
+		}
+		if stop || resp.NextPage == 0 || pages >= 2 {
 			break
 		}
 		opts.Page = resp.NextPage
@@ -298,8 +470,15 @@ func commitFromRepo(item *github.RepositoryCommit, owner, repo string, start, en
 			ts = item.Commit.Committer.GetDate().Time
 		}
 	}
-	if ts.IsZero() || !inWindow(ts, start, end) {
+	committer := time.Time{}
+	if item.Commit != nil && item.Commit.Committer != nil {
+		committer = item.Commit.Committer.GetDate().Time
+	}
+	if !inWindow(ts, start, end) && !inWindow(committer, start, end) {
 		return nil
+	}
+	if ts.IsZero() {
+		ts = committer
 	}
 	sha := item.GetSHA()
 	full := owner + "/" + repo
