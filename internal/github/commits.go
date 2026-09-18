@@ -84,7 +84,7 @@ func commitFromSearch(item *github.CommitResult, start, end time.Time) *CommitAc
 
 func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end time.Time) []CommitActivity {
 	var out []CommitActivity
-	out = append(out, c.paginatePushEvents(ctx, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+	out = append(out, c.paginatePushEvents(start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 		return c.gh.Activity.ListEventsPerformedByUser(ctx, login, false, opts)
 	})...)
 
@@ -98,14 +98,14 @@ func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end
 		if name == "" {
 			continue
 		}
-		out = append(out, c.paginatePushEvents(ctx, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+		out = append(out, c.paginatePushEvents(start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 			return c.gh.Activity.ListUserEventsForOrganization(ctx, name, login, opts)
 		})...)
 	}
 	return out
 }
 
-func (c *Client) paginatePushEvents(ctx context.Context, start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
+func (c *Client) paginatePushEvents(start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
 	opts := &github.ListOptions{PerPage: 100}
 	var out []CommitActivity
 	pages := 0

@@ -3,6 +3,7 @@ package ai
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/7AkhilV/daily-work/internal/activity"
 	gh "github.com/7AkhilV/daily-work/internal/github"
@@ -47,6 +48,26 @@ func TestBuildTopicsPrefersCommitsOverPRTitles(t *testing.T) {
 	}
 	if len(topics) < 2 {
 		t.Fatalf("expected commit-based topics, got %+v", topics)
+	}
+}
+
+func TestBuildTopicsIgnoresYesterdayPR(t *testing.T) {
+	loc := time.FixedZone("IST", 5*3600+30*60)
+	today := time.Date(2026, 9, 18, 0, 0, 0, 0, loc)
+	proc := &activity.ProcessedActivity{
+		Raw: &gh.DayActivity{Date: today},
+		PRs: []gh.PullRequestActivity{
+			{
+				RepoName:  "whistlingcitizen-BE",
+				Title:     "Registration form feature added",
+				CreatedAt: time.Date(2026, 9, 17, 16, 0, 0, 0, loc),
+				UpdatedAt: time.Date(2026, 9, 17, 20, 0, 0, 0, loc),
+			},
+		},
+	}
+	topics := BuildTopics(proc)
+	if len(topics) != 0 {
+		t.Fatalf("yesterday PR should not become today's work, got %+v", topics)
 	}
 }
 

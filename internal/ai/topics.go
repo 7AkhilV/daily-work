@@ -2,6 +2,7 @@ package ai
 
 import (
 	"strings"
+	"time"
 
 	"github.com/7AkhilV/daily-work/internal/activity"
 )
@@ -73,8 +74,11 @@ func BuildTopics(proc *activity.ProcessedActivity) []Topic {
 		}
 	}
 
-	// PRs only if we still have no commit-backed topics covering that work
+	// PR titles only for PRs opened today with no commits yet.
 	for _, pr := range proc.PRs {
+		if proc.Raw != nil && !sameLocalDay(pr.CreatedAt, proc.Raw.Date) {
+			continue
+		}
 		proj := activity.ShortName(pr.RepoName)
 		// Skip PR title if we already have any commits in this project today
 		hasProjectCommits := false
@@ -119,4 +123,14 @@ func topicLabel(key string) string {
 	default:
 		return key
 	}
+}
+
+func sameLocalDay(ts, day time.Time) bool {
+	if ts.IsZero() || day.IsZero() {
+		return false
+	}
+	loc := day.Location()
+	a := ts.In(loc)
+	b := day.In(loc)
+	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
 }
