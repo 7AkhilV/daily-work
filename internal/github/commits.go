@@ -72,9 +72,10 @@ func commitFromSearch(item *github.CommitResult, start, end time.Time) *CommitAc
 	}
 }
 
-func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end time.Time) []CommitActivity {
+func (c *Client) commitsFromEvents(ctx context.Context, login string, emails []string, start, end time.Time) []CommitActivity {
+	emailSet := toEmailSet(emails)
 	var out []CommitActivity
-	out = append(out, c.paginatePushEvents(login, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+	out = append(out, c.paginatePushEvents(login, emailSet, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 		return c.gh.Activity.ListEventsPerformedByUser(ctx, login, false, opts)
 	})...)
 
@@ -88,14 +89,14 @@ func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end
 		if name == "" {
 			continue
 		}
-		out = append(out, c.paginatePushEvents(login, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+		out = append(out, c.paginatePushEvents(login, emailSet, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 			return c.gh.Activity.ListUserEventsForOrganization(ctx, name, login, opts)
 		})...)
 	}
 	return out
 }
 
-func (c *Client) paginatePushEvents(login string, start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
+func (c *Client) paginatePushEvents(login string, emails map[string]bool, start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
 	opts := &github.ListOptions{PerPage: 100}
 	var out []CommitActivity
 	pages := 0
@@ -115,11 +116,10 @@ func (c *Client) paginatePushEvents(login string, start, end time.Time, list fun
 			if !inWindow(created, start, end) {
 				continue
 			}
-			if login != "" && ev.GetActor() != nil && ev.GetActor().GetLogin() != "" &&
-				!strings.EqualFold(ev.GetActor().GetLogin(), login) {
+			if !strings.EqualFold(ev.GetActor().GetLogin(), login) {
 				continue
 			}
-			out = append(out, commitsFromPushEvent(ev, created)...)
+			out = append(out, commitsFromPushEvent(ev, created, login, emails)...)
 		}
 		if stop || resp.NextPage == 0 || pages >= 5 {
 			break
@@ -129,7 +129,7 @@ func (c *Client) paginatePushEvents(login string, start, end time.Time, list fun
 	return out
 }
 
-func commitsFromPushEvent(ev *github.Event, created time.Time) []CommitActivity {
+func commitsFromPushEvent(ev *github.Event, created time.Time, login string, emails map[string]bool) []CommitActivity {
 	if ev == nil || ev.GetType() != "PushEvent" {
 		return nil
 	}
@@ -145,6 +145,12 @@ func commitsFromPushEvent(ev *github.Event, created time.Time) []CommitActivity 
 	owner, name := splitFullName(full)
 	var out []CommitActivity
 	for _, pc := range push.Commits {
+		if pc.Distinct != nil && !pc.GetDistinct() {
+			continue
+		}
+		if !pushCommitByUser(pc, login, emails) {
+			continue
+		}
 		msg := pc.GetMessage()
 		sha := pc.GetSHA()
 		out = append(out, CommitActivity{
@@ -159,6 +165,22 @@ func commitsFromPushEvent(ev *github.Event, created time.Time) []CommitActivity 
 		})
 	}
 	return out
+}
+
+func pushCommitByUser(pc *github.HeadCommit, login string, emails map[string]bool) bool {
+	if pc == nil {
+		return false
+	}
+	check := func(a *github.CommitAuthor) bool {
+		if a == nil {
+			return false
+		}
+		if emails[strings.ToLower(a.GetEmail())] {
+			return true
+		}
+		return login != "" && strings.EqualFold(a.GetName(), login)
+	}
+	return check(pc.Author) || check(pc.Committer)
 }
 
 func eventRepoFull(repo *github.Repository) string {
@@ -274,8 +296,8 @@ func (c *Client) commitsFromRepoBranches(ctx context.Context, owner, repo, login
 	return out
 }
 
-func (c *Client) commitsFromRepoEvents(ctx context.Context, owner, repo, login string, start, end time.Time) []CommitActivity {
-	return c.paginatePushEvents(login, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+func (c *Client) commitsFromRepoEvents(ctx context.Context, owner, repo, login string, emails []string, start, end time.Time) []CommitActivity {
+	return c.paginatePushEvents(login, toEmailSet(emails), start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
 		return c.gh.Activity.ListRepositoryEvents(ctx, owner, repo, opts)
 	})
 }

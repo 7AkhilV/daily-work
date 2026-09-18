@@ -13,11 +13,10 @@ func FallbackFromActivity(proc *activity.ProcessedActivity) []summary.WorkItem {
 }
 
 func FallbackFromTopics(topics []Topic, projects []string) []summary.WorkItem {
-	multi := len(projects) > 1
 	var items []summary.WorkItem
 	for _, t := range topics {
 		desc := summarizeTopic(t)
-		if desc == "" {
+		if desc == "" || isChoreText(desc) {
 			continue
 		}
 		proj := t.Project
@@ -25,7 +24,7 @@ func FallbackFromTopics(topics []Topic, projects []string) []summary.WorkItem {
 			proj = "WC"
 		}
 		text := desc
-		if multi && proj != "" {
+		if proj != "" {
 			text = proj + ": " + desc
 		}
 		items = append(items, summary.WorkItem{Text: humanizeLine(text), Project: proj})
@@ -47,6 +46,12 @@ func summarizeTopic(t Topic) string {
 	best = stripKnownPrefix(best)
 	best = cleanLine(best)
 
+	if t.Key == "signed_upload" {
+		return "Media uploads converted to signed URL uploads"
+	}
+	if t.Key == "job_post" {
+		return "Job post editing APIs added"
+	}
 	if t.Key == "schedule_inspect" {
 		if isTinyTitleChange(best) || (strings.Contains(strings.ToLower(best), "title") && len(t.Details) > 1) {
 			return "Scheduled inspect flow updates including title support and related admin/live changes"
@@ -109,6 +114,11 @@ func topicKeyFromText(body string) string {
 	case strings.Contains(body, "schedule") && strings.Contains(body, "inspect"),
 		strings.Contains(body, "scheduled inspect"):
 		return "schedule_inspect"
+	case strings.Contains(body, "signed") && (strings.Contains(body, "upload") || strings.Contains(body, "media")),
+		strings.Contains(body, "upload") && (strings.Contains(body, "media") || strings.Contains(body, "presign") || strings.Contains(body, "s3")):
+		return "signed_upload"
+	case strings.Contains(body, "job") && (strings.Contains(body, "edit") || strings.Contains(body, "update") || strings.Contains(body, "post")):
+		return "job_post"
 	case strings.Contains(body, "chat"):
 		return "chat"
 	case strings.Contains(body, "metric"), strings.Contains(body, "volunteer commitment"):
@@ -119,6 +129,8 @@ func topicKeyFromText(body string) string {
 		return "auth"
 	case strings.Contains(body, "redis"):
 		return "redis_chat"
+	case strings.Contains(body, "example") && (strings.Contains(body, "swagger") || strings.Contains(body, "openapi") || strings.Contains(body, "request") || strings.Contains(body, "response") || strings.Contains(body, "documentation")):
+		return "docs_examples"
 	default:
 		fields := strings.FieldsFunc(body, func(r rune) bool {
 			return r == ' ' || r == '-' || r == ':' || r == '/'

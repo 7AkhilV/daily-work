@@ -21,6 +21,17 @@ func firstLine(msg string) string {
 	return msg
 }
 
+func toEmailSet(emails []string) map[string]bool {
+	out := map[string]bool{}
+	for _, e := range emails {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e != "" {
+			out[e] = true
+		}
+	}
+	return out
+}
+
 func isMergeMessage(msg string) bool {
 	lower := strings.ToLower(firstLine(msg))
 	return strings.HasPrefix(lower, "merge ") || strings.HasPrefix(lower, "merge branch")

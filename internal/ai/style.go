@@ -70,7 +70,6 @@ func humanizeLine(s string) string {
 // StyleItems applies project-prefix rules to match the user's reporting style.
 func StyleItems(items []summary.WorkItem, proc *activity.ProcessedActivity) []summary.WorkItem {
 	projects := uniqueProjects(proc)
-	multi := len(projects) > 1
 	var out []summary.WorkItem
 	for _, it := range items {
 		line := humanizeLine(it.Text)
@@ -96,20 +95,17 @@ func StyleItems(items []summary.WorkItem, proc *activity.ProcessedActivity) []su
 		}
 		line = humanizeLine(line)
 
-		if multi {
-			if proj == "" && len(projects) == 1 {
-				proj = projects[0]
-			}
-			if proj == "CM" {
-				proj = "WC"
-			}
-			if proj != "" && !hasProjectPrefix(line, proj) {
-				line = proj + ": " + line
-			}
-		} else {
-			line = stripAllProjectPrefixes(line, projects)
-			line = cleanLine(line)
-			line = humanizeLine(line)
+		if proj == "" && len(projects) >= 1 {
+			proj = projects[0]
+		}
+		if proj == "CM" {
+			proj = "WC"
+		}
+		if proj != "" && !hasProjectPrefix(line, proj) {
+			line = proj + ": " + line
+		}
+		if isChoreText(line) {
+			continue
 		}
 
 		out = append(out, summary.WorkItem{
@@ -131,6 +127,7 @@ func PreferRichSummary(aiItems []summary.WorkItem, proc *activity.ProcessedActiv
 	if len(aiItems) == 0 {
 		return fallback
 	}
+	aiItems = ensureFeatureTopics(aiItems, fallback, topics)
 	if len(aiItems) > len(topics)+2 && len(topics) >= 2 {
 		return fallback
 	}
@@ -138,6 +135,70 @@ func PreferRichSummary(aiItems []summary.WorkItem, proc *activity.ProcessedActiv
 		return fallback
 	}
 	return aiItems
+}
+
+func ensureFeatureTopics(aiItems, fallback []summary.WorkItem, topics []Topic) []summary.WorkItem {
+	out := aiItems
+	for _, t := range topics {
+		if t.Key == "docs_examples" {
+			continue
+		}
+		if topicHasLine(out, t) {
+			continue
+		}
+		added := false
+		for _, fb := range fallback {
+			if fb.Project == t.Project && topicKeyFromText(strings.ToLower(stripKnownPrefix(fb.Text))) == t.Key {
+				out = append(out, fb)
+				added = true
+				break
+			}
+		}
+		if added {
+			continue
+		}
+		desc := summarizeTopic(t)
+		if desc == "" || isChoreText(desc) {
+			continue
+		}
+		line := desc
+		if t.Project != "" {
+			line = t.Project + ": " + desc
+		}
+		out = append(out, summary.WorkItem{Text: humanizeLine(line), Project: t.Project})
+	}
+	return out
+}
+
+func topicHasLine(items []summary.WorkItem, t Topic) bool {
+	for _, it := range items {
+		line := strings.ToLower(it.Text + " " + it.Project)
+		switch t.Key {
+		case "signed_upload":
+			if strings.Contains(line, "upload") || strings.Contains(line, "signed") || strings.Contains(line, "media") {
+				return true
+			}
+		case "job_post":
+			if strings.Contains(line, "job") {
+				return true
+			}
+		default:
+			if t.Key != "" && strings.Contains(line, strings.ToLower(strings.ReplaceAll(t.Key, "_", " "))) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isChoreText(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "nodemon") ||
+		strings.Contains(lower, "development dependency") ||
+		strings.Contains(lower, "unused environment") ||
+		strings.Contains(lower, "unused import") ||
+		strings.Contains(lower, "build script") ||
+		strings.Contains(lower, "clean the build")
 }
 
 func detectPrefix(line string) string {

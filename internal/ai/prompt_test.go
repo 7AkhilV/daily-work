@@ -71,6 +71,92 @@ func TestBuildTopicsIgnoresYesterdayPR(t *testing.T) {
 	}
 }
 
+func TestBuildTopicsPrefersFeaturesOverSwaggerExamples(t *testing.T) {
+	proc := &activity.ProcessedActivity{
+		Clusters: []activity.Cluster{{
+			ShortName: "MAB",
+			Commits: []activity.ProcessedCommit{
+				{CommitActivity: gh.CommitActivity{
+					Message: "convert media upload to signed url uploads",
+					Files:   []gh.FileChange{{Filename: "internal/upload/signed.go"}},
+				}},
+				{CommitActivity: gh.CommitActivity{
+					Message: "job post editing APIs",
+					Files:   []gh.FileChange{{Filename: "internal/job/edit.go"}},
+				}},
+				{CommitActivity: gh.CommitActivity{
+					Message: "Enhanced API documentation with example data for requests and responses",
+					Files:   []gh.FileChange{{Filename: "docs/swagger.yaml"}},
+					// swagger-only is noise
+				}},
+			},
+		}},
+	}
+	// mark swagger commit as noise the same way Process() would
+	proc.Clusters[0].Commits[2].NoiseHint = true
+	topics := BuildTopics(proc)
+	got := map[string]bool{}
+	for _, tp := range topics {
+		got[tp.Key] = true
+		for _, d := range tp.Details {
+			if strings.Contains(strings.ToLower(d), "example data") {
+				t.Fatalf("swagger example leaked: %+v", topics)
+			}
+		}
+	}
+	if !got["signed_upload"] || !got["job_post"] {
+		t.Fatalf("expected signed_upload and job_post, got %+v", topics)
+	}
+	if got["docs_examples"] {
+		t.Fatalf("docs_examples should be dropped when features exist: %+v", topics)
+	}
+}
+
+func TestStyleItemsAlwaysPrefixes(t *testing.T) {
+	proc := &activity.ProcessedActivity{
+		Clusters: []activity.Cluster{{
+			ShortName: "MAB",
+			Commits: []activity.ProcessedCommit{
+				{CommitActivity: gh.CommitActivity{Message: "job post editing APIs"}},
+			},
+		}},
+	}
+	out := StyleItems([]summary.WorkItem{{Text: "Job post editing APIs added", Project: "MAB"}}, proc)
+	if len(out) != 1 || !strings.HasPrefix(out[0].Text, "MAB:") {
+		t.Fatalf("expected MAB prefix, got %+v", out)
+	}
+}
+
+func TestPreferRichSummaryInjectsSignedUpload(t *testing.T) {
+	proc := &activity.ProcessedActivity{
+		Clusters: []activity.Cluster{{
+			ShortName: "MAB",
+			Commits: []activity.ProcessedCommit{
+				{CommitActivity: gh.CommitActivity{
+					Message: "convert media upload to signed url uploads",
+					Files:   []gh.FileChange{{Filename: "internal/upload/signed.go"}},
+				}},
+				{CommitActivity: gh.CommitActivity{
+					Message: "job post editing APIs",
+					Files:   []gh.FileChange{{Filename: "internal/job/edit.go"}},
+				}},
+			},
+		}},
+	}
+	aiItems := []summary.WorkItem{{Text: "Added job editing API endpoint", Project: "MAB"}}
+	out := PreferRichSummary(aiItems, proc)
+	blob := ""
+	for _, it := range out {
+		blob += strings.ToLower(it.Text) + "\n"
+		if !strings.HasPrefix(it.Text, "MAB:") {
+			t.Fatalf("missing project prefix: %q", it.Text)
+		}
+	}
+	if !strings.Contains(blob, "upload") && !strings.Contains(blob, "signed") {
+		t.Fatalf("signed media uploads missing: %s", blob)
+	}
+}
+
 func TestHumanizeAndNoBrackets(t *testing.T) {
 	got := humanizeLine("WC: [WC] Add scheduled inspect live flow")
 	if strings.Contains(got, "[WC]") {

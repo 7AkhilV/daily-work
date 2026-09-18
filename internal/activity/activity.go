@@ -11,6 +11,7 @@ import (
 var (
 	suffixRe = regexp.MustCompile(`(?i)(-be|-fe|-backend|-frontend|-api|-app|-service|-svc|-web|-ios|-android)$`)
 	noiseMsg = regexp.MustCompile(`(?i)^(merge\b|resolve conflicts|format(ting)?( code)?|prettier|eslint|chore:\s*bump|bump version|update lockfile|regenerate|generated)`)
+	choreMsg = regexp.MustCompile(`(?i)(nodemon|dev(elopment)? dependency|unused (env|import)|build script|clean the build|package-lock|yarn\.lock)`)
 )
 
 type ProcessedCommit struct {
@@ -187,13 +188,53 @@ func isNoise(c gh.CommitActivity) bool {
 	if c.IsMerge {
 		return true
 	}
-	if noiseMsg.MatchString(c.Message) {
+	if featureHint(c) {
+		return false
+	}
+	if noiseMsg.MatchString(c.Message) || choreMsg.MatchString(c.Message) {
 		return true
 	}
 	if len(c.Files) > 0 && allLockOrGenerated(c.Files) {
 		return true
 	}
+	if len(c.Files) > 0 && allDocOrExample(c.Files) {
+		return true
+	}
+	if len(c.Files) > 0 && allChoreFiles(c.Files) {
+		return true
+	}
 	return false
+}
+
+func featureHint(c gh.CommitActivity) bool {
+	blob := strings.ToLower(c.Message)
+	for _, f := range c.Files {
+		blob += " " + strings.ToLower(f.Filename)
+	}
+	if strings.Contains(blob, "upload") || strings.Contains(blob, "signed") || strings.Contains(blob, "media") {
+		return true
+	}
+	return strings.Contains(blob, "job") && (strings.Contains(blob, "edit") || strings.Contains(blob, "post"))
+}
+
+func allChoreFiles(files []gh.FileChange) bool {
+	if len(files) == 0 {
+		return false
+	}
+	for _, f := range files {
+		name := strings.ToLower(f.Filename)
+		if strings.HasSuffix(name, "package.json") ||
+			strings.HasSuffix(name, "package-lock.json") ||
+			strings.HasSuffix(name, "yarn.lock") ||
+			strings.HasSuffix(name, "pnpm-lock.yaml") ||
+			strings.HasSuffix(name, "nodemon.json") ||
+			strings.Contains(name, "dockerfile") ||
+			name == "makefile" {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func allLockOrGenerated(files []gh.FileChange) bool {
@@ -213,6 +254,32 @@ func allLockOrGenerated(files []gh.FileChange) bool {
 		return false
 	}
 	return true
+}
+
+func allDocOrExample(files []gh.FileChange) bool {
+	if len(files) == 0 {
+		return false
+	}
+	for _, f := range files {
+		if !IsDocPath(f.Filename) {
+			return false
+		}
+	}
+	return true
+}
+
+func IsDocPath(name string) bool {
+	n := strings.ToLower(name)
+	if strings.HasSuffix(n, ".md") || strings.Contains(n, "/docs/") || strings.HasPrefix(n, "docs/") {
+		return true
+	}
+	if strings.Contains(n, "swagger") || strings.Contains(n, "openapi") {
+		return true
+	}
+	if strings.Contains(n, "example") && (strings.HasSuffix(n, ".json") || strings.HasSuffix(n, ".yaml") || strings.HasSuffix(n, ".yml")) {
+		return true
+	}
+	return false
 }
 
 func groupCommits(commits []ProcessedCommit) []Cluster {

@@ -41,13 +41,6 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 		addCommit(cm)
 	}
 
-	found, err = c.searchCommits(ctx, fmt.Sprintf("committer:%s", login), start, end)
-	if err == nil {
-		for _, cm := range found {
-			addCommit(cm)
-		}
-	}
-
 	for _, email := range emails {
 		if email == "" {
 			continue
@@ -71,7 +64,7 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 		}
 	}
 
-	for _, cm := range c.commitsFromEvents(ctx, login, start, end) {
+	for _, cm := range c.commitsFromEvents(ctx, login, emails, start, end) {
 		addCommit(cm)
 	}
 
@@ -95,7 +88,7 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 		}
 		checked = append(checked, owner+"/"+name)
 		before := len(seen)
-		for _, cm := range c.commitsFromRepoEvents(ctx, owner, name, login, start, end) {
+		for _, cm := range c.commitsFromRepoEvents(ctx, owner, name, login, emails, start, end) {
 			addCommit(cm)
 		}
 		for _, cm := range c.commitsFromRepo(ctx, owner, name, login, emails, start, end, "") {
@@ -107,7 +100,7 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 				addCommit(cm)
 				hadCommit = true
 			}
-			if hadCommit || inWindow(pr.CreatedAt, start, end) {
+			if hadCommit {
 				addPR(pr)
 			}
 		}
@@ -133,7 +126,7 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 			addCommit(cm)
 			hadCommit = true
 		}
-		if hadCommit || inWindow(pr.CreatedAt, start, end) {
+		if hadCommit {
 			addPR(pr)
 		}
 	}
