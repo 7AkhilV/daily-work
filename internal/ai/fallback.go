@@ -16,7 +16,7 @@ func FallbackFromTopics(topics []Topic, projects []string) []summary.WorkItem {
 	var items []summary.WorkItem
 	for _, t := range topics {
 		desc := summarizeTopic(t)
-		if desc == "" || isChoreText(desc) {
+		if desc == "" || isChoreText(desc) || isTooTechnical(desc) {
 			continue
 		}
 		proj := t.Project
@@ -47,10 +47,10 @@ func summarizeTopic(t Topic) string {
 	best = cleanLine(best)
 
 	if t.Key == "signed_upload" {
-		return "Media uploads converted to signed URL uploads"
+		return "Media uploads now use secure signed links"
 	}
 	if t.Key == "job_post" {
-		return "Job post editing APIs added"
+		return "Job posts can be edited after they are created"
 	}
 	if t.Key == "schedule_inspect" {
 		if isTinyTitleChange(best) || (strings.Contains(strings.ToLower(best), "title") && len(t.Details) > 1) {

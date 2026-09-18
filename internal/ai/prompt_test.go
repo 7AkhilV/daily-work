@@ -112,6 +112,53 @@ func TestBuildTopicsPrefersFeaturesOverSwaggerExamples(t *testing.T) {
 	}
 }
 
+func TestCrispNonTechnicalDailySummary(t *testing.T) {
+	full := "Marma-Fintech-official/MarmaAdmin_BE"
+	day := &gh.DayActivity{
+		User: "akhil-throughbit",
+		Commits: []gh.CommitActivity{
+			{SHA: "1", Owner: "Marma-Fintech-official", RepoName: "MarmaAdmin_BE", RepoFull: full, Message: "convert media uploads to signed urls", Files: []gh.FileChange{{Filename: "docs/swagger.yaml"}}},
+			{SHA: "2", Owner: "Marma-Fintech-official", RepoName: "MarmaAdmin_BE", RepoFull: full, Message: "job post editing APIs", Files: []gh.FileChange{{Filename: "internal/job/edit.go"}}},
+			{SHA: "3", Owner: "Marma-Fintech-official", RepoName: "MarmaAdmin_BE", RepoFull: full, Message: "Added nodemon as a development dependency"},
+			{SHA: "4", Owner: "Marma-Fintech-official", RepoName: "MarmaAdmin_BE", RepoFull: full, Message: "Removed unused environment variable import from app initialization"},
+			{SHA: "5", Owner: "Marma-Fintech-official", RepoName: "MarmaAdmin_BE", RepoFull: full, Message: "Updated build script to clean the build directory before compilation"},
+			{SHA: "6", Owner: "Marma-Fintech-official", RepoName: "MarmaAdmin_BE", RepoFull: full, Message: "refactored portfolio links to JSON format"},
+		},
+	}
+	proc := activity.Process(day, nil)
+	aiItems := []summary.WorkItem{{
+		Text: "Added job editing API endpoint, refactored portfolio links to JSON format, and made job application fields optional",
+	}}
+	out := PreferRichSummary(aiItems, proc)
+	if len(out) == 0 {
+		t.Fatal("expected summary lines")
+	}
+	blob := ""
+	for _, it := range out {
+		blob += it.Text + "\n"
+		if !strings.HasPrefix(it.Text, "MAB:") {
+			t.Fatalf("missing project prefix: %q", it.Text)
+		}
+		body := strings.TrimSpace(it.Text[4:])
+		if len(strings.Fields(body)) > 14 {
+			t.Fatalf("line too long for a daily update: %q", it.Text)
+		}
+		low := strings.ToLower(it.Text)
+		for _, bad := range []string{"nodemon", "json format", "api endpoint", "build script", "swagger", "unused"} {
+			if strings.Contains(low, bad) {
+				t.Fatalf("too technical/chore: %q", it.Text)
+			}
+		}
+	}
+	low := strings.ToLower(blob)
+	if !strings.Contains(low, "upload") && !strings.Contains(low, "signed") && !strings.Contains(low, "media") {
+		t.Fatalf("media uploads missing:\n%s", blob)
+	}
+	if !strings.Contains(low, "job") {
+		t.Fatalf("job editing missing:\n%s", blob)
+	}
+}
+
 func TestStyleItemsAlwaysPrefixes(t *testing.T) {
 	proc := &activity.ProcessedActivity{
 		Clusters: []activity.Cluster{{
@@ -154,6 +201,14 @@ func TestPreferRichSummaryInjectsSignedUpload(t *testing.T) {
 	}
 	if !strings.Contains(blob, "upload") && !strings.Contains(blob, "signed") {
 		t.Fatalf("signed media uploads missing: %s", blob)
+	}
+	if !strings.Contains(blob, "job") {
+		t.Fatalf("job editing missing: %s", blob)
+	}
+	for _, it := range out {
+		if strings.Contains(strings.ToLower(it.Text), "api endpoint") {
+			t.Fatalf("too technical: %q", it.Text)
+		}
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 )
 
 var dateFlag string
+var printFlag bool
 
 func NewRoot() *cobra.Command {
 	root := &cobra.Command{
@@ -29,6 +30,7 @@ func NewRoot() *cobra.Command {
 		RunE:  runDaily,
 	}
 	root.PersistentFlags().StringVar(&dateFlag, "date", "", "Date (YYYY-MM-DD). Defaults to today.")
+	root.Flags().BoolVar(&printFlag, "print", false, "Print the summary and exit (no interactive UI)")
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newConfigCmd())
@@ -106,6 +108,11 @@ func runDaily(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Println("✓ Summary generated")
 		fmt.Println()
+	}
+
+	if printFlag {
+		fmt.Print(summary.FormatSummary(day, items))
+		return nil
 	}
 
 	onRegen := func() ([]summary.WorkItem, error) {

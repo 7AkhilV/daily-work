@@ -11,7 +11,7 @@ import (
 var (
 	suffixRe = regexp.MustCompile(`(?i)(-be|-fe|-backend|-frontend|-api|-app|-service|-svc|-web|-ios|-android)$`)
 	noiseMsg = regexp.MustCompile(`(?i)^(merge\b|resolve conflicts|format(ting)?( code)?|prettier|eslint|chore:\s*bump|bump version|update lockfile|regenerate|generated)`)
-	choreMsg = regexp.MustCompile(`(?i)(nodemon|dev(elopment)? dependency|unused (env|import)|build script|clean the build|package-lock|yarn\.lock)`)
+	choreMsg = regexp.MustCompile(`(?i)(nodemon|dev(elopment)? dependency|unused (env|import|environment)|build script|clean the build|app initialization|package-lock|yarn\.lock)`)
 )
 
 type ProcessedCommit struct {

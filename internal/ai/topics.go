@@ -36,7 +36,7 @@ func BuildTopics(proc *activity.ProcessedActivity) []Topic {
 			return
 		}
 		lower := strings.ToLower(raw)
-		if strings.HasPrefix(lower, "merge ") {
+		if strings.HasPrefix(lower, "merge ") || isChoreText(raw) || isTooTechnical(raw) {
 			return
 		}
 		keyName := topicKeyFromCommit(raw, files)

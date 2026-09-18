@@ -104,7 +104,7 @@ func StyleItems(items []summary.WorkItem, proc *activity.ProcessedActivity) []su
 		if proj != "" && !hasProjectPrefix(line, proj) {
 			line = proj + ": " + line
 		}
-		if isChoreText(line) {
+		if isChoreText(line) || isRambling(line) || isTooTechnical(line) {
 			continue
 		}
 
@@ -158,7 +158,7 @@ func ensureFeatureTopics(aiItems, fallback []summary.WorkItem, topics []Topic) [
 			continue
 		}
 		desc := summarizeTopic(t)
-		if desc == "" || isChoreText(desc) {
+		if desc == "" || isChoreText(desc) || isTooTechnical(desc) {
 			continue
 		}
 		line := desc
@@ -198,7 +198,28 @@ func isChoreText(s string) bool {
 		strings.Contains(lower, "unused environment") ||
 		strings.Contains(lower, "unused import") ||
 		strings.Contains(lower, "build script") ||
-		strings.Contains(lower, "clean the build")
+		strings.Contains(lower, "clean the build") ||
+		strings.Contains(lower, "json format") ||
+		strings.Contains(lower, "environment variable") ||
+		strings.Contains(lower, "app initialization") ||
+		strings.Contains(lower, "package.json") ||
+		strings.Contains(lower, "lockfile")
+}
+
+func isTooTechnical(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "api endpoint") ||
+		strings.Contains(lower, "json format") ||
+		strings.Contains(lower, "refactored") ||
+		strings.Contains(lower, "swagger") ||
+		strings.Contains(lower, "openapi") ||
+		strings.Contains(lower, "payload") ||
+		strings.Contains(lower, "optional fields")
+}
+
+func isRambling(s string) bool {
+	body := stripKnownPrefix(s)
+	return strings.Count(body, ",") >= 2 || len(strings.Fields(body)) > 16
 }
 
 func detectPrefix(line string) string {

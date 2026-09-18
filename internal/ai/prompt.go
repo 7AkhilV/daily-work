@@ -29,42 +29,35 @@ func buildPrompt(input ActivityInput) string {
 	topics := BuildTopics(input.Processed)
 
 	var b strings.Builder
-	b.WriteString(`You write a developer's daily Slack work update.
+	b.WriteString(`You write a short daily work update for Slack.
+
+A non-technical manager should understand each line in a few seconds.
 
 Output JSON only:
 {"items":[{"text":"MAB: ...","project":"MAB"}]}
 
 CRITICAL STYLE:
 - ALWAYS start every line with the project short name: "MAB: ..." / "WC: ..." (never [MAB])
-`)
-	b.WriteString(`- COMMITS are the source of truth — summarize from commit messages AND changed files, not PR titles
-- One line per FEATURE / TOPIC (merge related commits into ONE line)
-- Infer the product feature from code files (handlers, services, APIs)
-- Prefer real features: signed URL uploads, job post editing APIs, bug fixes
-- Do NOT write lines about swagger/openapi/example request-response payloads when code files show a real feature
-- Do NOT write tiny lines like "title added" and "title updated" separately
-- Past-tense / done wording: "done", "fixed", "added", "updated" — not "Add", "Enhance", "Require"
-- No issue numbers (#509), no markdown, no commentary
-- Skip merges/prettier/lockfile/docs-only/nodemon/build-script noise
-- Do not invent work
-- Do not include work from other people's repositories/commits
-- If signed/media uploads are in the topics, they MUST get their own line
+- One short line per real product feature (about 8–12 words after the prefix)
+- Say what people can do now, not how the code was written
+- No JSON, APIs, swagger, endpoints, env vars, imports, nodemon, build scripts, lockfiles, or example payloads
+- Do not stack 3 changes into one comma-separated sentence
+- Past tense / done: "added", "fixed", "updated"
+- Skip chores and docs-only work
+- Do not invent work or other people's commits
+- If media/signed uploads are in the topics, they MUST get their own line
+- If job editing is in the topics, they MUST get their own line
 
-GOOD (one feature = one line):
-WC: Scheduled inspect live flow with title support and admin panel integration
-MAB: Media uploads converted to signed URL uploads
-MAB: Job post editing APIs added
+GOOD:
+MAB: Media uploads now use secure signed links
+MAB: Job posts can be edited after they are created
+WC: Chat messages stay when people reconnect
 
-BAD (never):
-WC: schedule inspect creation title added
-MAB: Enhanced API documentation with example data...
-MAB: Added example data structures and request/response formats...
+BAD:
+Added job editing API endpoint, refactored portfolio links to JSON format, and made job application fields optional
+Added nodemon as a development dependency
+MAB: Enhanced API documentation with example data
 UGQ: Fixed harsh bug
-QuestAndGames: Fixed harsh bug
-WC: Add scheduled inspect live flow...
-WC: [WC] Chat module fix
-CM: Refactor chat service...
-
 `)
 	b.WriteString("Date: " + input.DateLabel + "\n")
 	if len(projects) > 0 {
