@@ -3,15 +3,12 @@ package github
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
 // FetchDayActivity discovers commits (primary) and PRs (secondary context) for the day.
 func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts FetchOptions) (*DayActivity, error) {
-	loc := day.Location()
-	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-	end := start.Add(24 * time.Hour)
+	start, end := dayBounds(day)
 
 	login := c.Login()
 	emails, err := c.userEmails(ctx)
@@ -51,7 +48,7 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 	}
 
 	for _, email := range emails {
-		if email == "" || strings.Contains(email, "noreply") {
+		if email == "" {
 			continue
 		}
 		found, err = c.searchCommits(ctx, fmt.Sprintf("author-email:%s", email), start, end)
@@ -67,6 +64,16 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 		addCommit(cm)
 	}
 
+	for _, pair := range c.recentlyPushedRepos(ctx, start) {
+		owner, name := pair[0], pair[1]
+		if !opts.IncludePersonalRepos && !c.allowRepo(ctx, owner, name) {
+			continue
+		}
+		for _, cm := range c.commitsFromRepo(ctx, owner, name, login, start, end) {
+			addCommit(cm)
+		}
+	}
+
 	prs, err := c.searchPRs(ctx, login, start, end)
 	if err != nil {
 		prs = nil
@@ -77,9 +84,15 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 		if !opts.IncludePersonalRepos && !c.allowRepo(ctx, owner, pr.RepoName) {
 			continue
 		}
-		filteredPRs = append(filteredPRs, pr)
+		hadCommit := false
 		for _, cm := range c.commitsFromPR(ctx, owner, pr.RepoName, pr.Number, login, emails, start, end) {
 			addCommit(cm)
+			hadCommit = true
+		}
+		// Keep PRs only when they contribute today's work. Yesterday's leftover
+		// PRs (common with UTC date search) must not become today's summary.
+		if hadCommit || inWindow(pr.CreatedAt, start, end) {
+			filteredPRs = append(filteredPRs, pr)
 		}
 	}
 	prs = filteredPRs

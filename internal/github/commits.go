@@ -10,8 +10,18 @@ import (
 )
 
 func (c *Client) searchCommits(ctx context.Context, qualifier string, start, end time.Time) ([]CommitActivity, error) {
-	from := start.UTC().Format("2006-01-02")
-	to := end.UTC().Add(-time.Second).Format("2006-01-02")
+	from, to := searchRange(start, end)
+	results, err := c.searchCommitsQuery(ctx, qualifier, from, to, start, end)
+	if err == nil {
+		return results, nil
+	}
+	// Some GitHub search backends only accept YYYY-MM-DD; still post-filter to local day.
+	from = start.UTC().Format("2006-01-02")
+	to = end.UTC().Add(-time.Second).Format("2006-01-02")
+	return c.searchCommitsQuery(ctx, qualifier, from, to, start, end)
+}
+
+func (c *Client) searchCommitsQuery(ctx context.Context, qualifier, from, to string, start, end time.Time) ([]CommitActivity, error) {
 	q := fmt.Sprintf("%s author-date:%s..%s", qualifier, from, to)
 	if strings.HasPrefix(qualifier, "committer:") || strings.HasPrefix(qualifier, "committer-email:") {
 		q = fmt.Sprintf("%s committer-date:%s..%s", qualifier, from, to)
@@ -57,7 +67,7 @@ func commitFromSearch(item *github.CommitResult, start, end time.Time) *CommitAc
 	if ts.IsZero() && item.Commit != nil && item.Commit.Committer != nil {
 		ts = item.Commit.Committer.GetDate().Time
 	}
-	if !ts.IsZero() && (ts.Before(start) || !ts.Before(end)) {
+	if !ts.IsZero() && !inWindow(ts, start, end) {
 		return nil
 	}
 	return &CommitActivity{
@@ -73,11 +83,34 @@ func commitFromSearch(item *github.CommitResult, start, end time.Time) *CommitAc
 }
 
 func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end time.Time) []CommitActivity {
+	var out []CommitActivity
+	out = append(out, c.paginatePushEvents(ctx, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+		return c.gh.Activity.ListEventsPerformedByUser(ctx, login, false, opts)
+	})...)
+
+	// Private org pushes often do not show up on /users/{user}/events.
+	orgs, err := c.gh.Organizations.List(ctx, "", &github.ListOptions{PerPage: 100})
+	if err != nil {
+		return out
+	}
+	for _, org := range orgs {
+		name := org.GetLogin()
+		if name == "" {
+			continue
+		}
+		out = append(out, c.paginatePushEvents(ctx, start, end, func(opts *github.ListOptions) ([]*github.Event, *github.Response, error) {
+			return c.gh.Activity.ListUserEventsForOrganization(ctx, name, login, opts)
+		})...)
+	}
+	return out
+}
+
+func (c *Client) paginatePushEvents(ctx context.Context, start, end time.Time, list func(*github.ListOptions) ([]*github.Event, *github.Response, error)) []CommitActivity {
 	opts := &github.ListOptions{PerPage: 100}
 	var out []CommitActivity
 	pages := 0
 	for {
-		events, resp, err := c.gh.Activity.ListEventsPerformedByUser(ctx, login, false, opts)
+		events, resp, err := list(opts)
 		if err != nil {
 			return out
 		}
@@ -89,47 +122,69 @@ func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end
 				stop = true
 				break
 			}
-			if !created.Before(end) {
+			if !inWindow(created, start, end) {
 				continue
 			}
-			if ev.GetType() != "PushEvent" {
-				continue
-			}
-			raw, err := ev.ParsePayload()
-			if err != nil {
-				continue
-			}
-			push, ok := raw.(*github.PushEvent)
-			if !ok || push == nil {
-				continue
-			}
-			repo := ev.GetRepo()
-			full := repo.GetName()
-			if !strings.Contains(full, "/") {
-				full = repo.GetFullName()
-			}
-			owner, name := splitFullName(full)
-			for _, pc := range push.Commits {
-				msg := pc.GetMessage()
-				sha := pc.GetSHA()
-				out = append(out, CommitActivity{
-					SHA:       sha,
-					Message:   firstLine(msg),
-					RepoFull:  full,
-					RepoName:  name,
-					Owner:     owner,
-					URL:       fmt.Sprintf("https://github.com/%s/commit/%s", full, sha),
-					Timestamp: created,
-					IsMerge:   isMergeMessage(msg),
-				})
-			}
+			out = append(out, commitsFromPushEvent(ev, created)...)
 		}
-		if stop || resp.NextPage == 0 || pages >= 3 {
+		if stop || resp.NextPage == 0 || pages >= 5 {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
 	return out
+}
+
+func commitsFromPushEvent(ev *github.Event, created time.Time) []CommitActivity {
+	if ev == nil || ev.GetType() != "PushEvent" {
+		return nil
+	}
+	raw, err := ev.ParsePayload()
+	if err != nil {
+		return nil
+	}
+	push, ok := raw.(*github.PushEvent)
+	if !ok || push == nil {
+		return nil
+	}
+	full := eventRepoFull(ev.GetRepo())
+	owner, name := splitFullName(full)
+	var out []CommitActivity
+	for _, pc := range push.Commits {
+		msg := pc.GetMessage()
+		sha := pc.GetSHA()
+		out = append(out, CommitActivity{
+			SHA:       sha,
+			Message:   firstLine(msg),
+			RepoFull:  full,
+			RepoName:  name,
+			Owner:     owner,
+			URL:       fmt.Sprintf("https://github.com/%s/commit/%s", full, sha),
+			Timestamp: created,
+			IsMerge:   isMergeMessage(msg),
+		})
+	}
+	return out
+}
+
+func eventRepoFull(repo *github.Repository) string {
+	if repo == nil {
+		return ""
+	}
+	if full := repo.GetFullName(); strings.Contains(full, "/") {
+		return full
+	}
+	if name := repo.GetName(); strings.Contains(name, "/") {
+		return name
+	}
+	url := strings.TrimPrefix(repo.GetURL(), "https://api.github.com/repos/")
+	if strings.Contains(url, "/") && !strings.Contains(url, "://") {
+		return url
+	}
+	if repo.Owner != nil && repo.Owner.GetLogin() != "" && repo.GetName() != "" {
+		return repo.Owner.GetLogin() + "/" + repo.GetName()
+	}
+	return repo.GetName()
 }
 
 func (c *Client) commitsFromPR(ctx context.Context, owner, repo string, number int, login string, emails []string, start, end time.Time) []CommitActivity {
@@ -152,32 +207,9 @@ func (c *Client) commitsFromPR(ctx context.Context, owner, repo string, number i
 			if !commitByUser(item, login, emailSet) {
 				continue
 			}
-			msg := ""
-			ts := time.Time{}
-			if item.Commit != nil {
-				msg = item.Commit.GetMessage()
-				if item.Commit.Author != nil {
-					ts = item.Commit.Author.GetDate().Time
-				}
-				if ts.IsZero() && item.Commit.Committer != nil {
-					ts = item.Commit.Committer.GetDate().Time
-				}
+			if cm := commitFromRepo(item, owner, repo, start, end); cm != nil {
+				out = append(out, *cm)
 			}
-			if ts.IsZero() || ts.Before(start) || !ts.Before(end) {
-				continue
-			}
-			sha := item.GetSHA()
-			full := owner + "/" + repo
-			out = append(out, CommitActivity{
-				SHA:       sha,
-				Message:   firstLine(msg),
-				RepoFull:  full,
-				RepoName:  repo,
-				Owner:     owner,
-				URL:       item.GetHTMLURL(),
-				Timestamp: ts,
-				IsMerge:   isMergeMessage(msg),
-			})
 		}
 		if resp.NextPage == 0 {
 			break
@@ -185,6 +217,116 @@ func (c *Client) commitsFromPR(ctx context.Context, owner, repo string, number i
 		opts.Page = resp.NextPage
 	}
 	return out
+}
+
+func (c *Client) commitsFromRepo(ctx context.Context, owner, repo, login string, start, end time.Time) []CommitActivity {
+	if owner == "" || repo == "" || login == "" {
+		return nil
+	}
+	opts := &github.CommitsListOptions{
+		Author:      login,
+		Since:       start,
+		Until:       end,
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	var out []CommitActivity
+	for {
+		list, resp, err := c.gh.Repositories.ListCommits(ctx, owner, repo, opts)
+		if err != nil {
+			return out
+		}
+		for _, item := range list {
+			if cm := commitFromRepo(item, owner, repo, start, end); cm != nil {
+				out = append(out, *cm)
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return out
+}
+
+func (c *Client) recentlyPushedRepos(ctx context.Context, start time.Time) [][2]string {
+	opts := &github.RepositoryListByAuthenticatedUserOptions{
+		Sort:        "pushed",
+		Direction:   "desc",
+		ListOptions: github.ListOptions{PerPage: 50},
+	}
+	var out [][2]string
+	pages := 0
+	for {
+		repos, resp, err := c.gh.Repositories.ListByAuthenticatedUser(ctx, opts)
+		if err != nil {
+			return out
+		}
+		pages++
+		stop := false
+		for _, r := range repos {
+			if !r.GetPushedAt().Time.IsZero() && r.GetPushedAt().Time.Before(start) {
+				stop = true
+				break
+			}
+			owner := ""
+			if r.Owner != nil {
+				owner = r.Owner.GetLogin()
+			}
+			name := r.GetName()
+			if owner == "" || name == "" {
+				owner, name = splitFullName(r.GetFullName())
+			}
+			if owner == "" || name == "" {
+				continue
+			}
+			out = append(out, [2]string{owner, name})
+			if len(out) >= 30 {
+				stop = true
+				break
+			}
+		}
+		if stop || resp.NextPage == 0 || pages >= 2 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return out
+}
+
+func commitFromRepo(item *github.RepositoryCommit, owner, repo string, start, end time.Time) *CommitActivity {
+	if item == nil {
+		return nil
+	}
+	msg := ""
+	ts := time.Time{}
+	if item.Commit != nil {
+		msg = item.Commit.GetMessage()
+		if item.Commit.Author != nil {
+			ts = item.Commit.Author.GetDate().Time
+		}
+		if ts.IsZero() && item.Commit.Committer != nil {
+			ts = item.Commit.Committer.GetDate().Time
+		}
+	}
+	if ts.IsZero() || !inWindow(ts, start, end) {
+		return nil
+	}
+	sha := item.GetSHA()
+	full := owner + "/" + repo
+	url := item.GetHTMLURL()
+	if url == "" {
+		url = fmt.Sprintf("https://github.com/%s/commit/%s", full, sha)
+	}
+	return &CommitActivity{
+		SHA:       sha,
+		Message:   firstLine(msg),
+		RepoFull:  full,
+		RepoName:  repo,
+		Owner:     owner,
+		URL:       url,
+		Timestamp: ts,
+		IsMerge:   isMergeMessage(msg),
+	}
 }
 
 func commitByUser(item *github.RepositoryCommit, login string, emails map[string]bool) bool {
@@ -229,7 +371,19 @@ func (c *Client) commitFiles(ctx context.Context, owner, repo, sha string) ([]Fi
 }
 
 func (c *Client) searchPRs(ctx context.Context, login string, start, end time.Time) ([]PullRequestActivity, error) {
-	q := fmt.Sprintf("author:%s type:pr updated:%s..%s", login, start.UTC().Format("2006-01-02"), end.UTC().Format("2006-01-02"))
+	from, to := searchRange(start, end)
+	results, err := c.searchPRsQuery(ctx, login, from, to, start, end)
+	if err == nil {
+		return results, nil
+	}
+	from = start.UTC().Format("2006-01-02")
+	to = end.UTC().Add(-time.Second).Format("2006-01-02")
+	return c.searchPRsQuery(ctx, login, from, to, start, end)
+}
+
+func (c *Client) searchPRsQuery(ctx context.Context, login, from, to string, start, end time.Time) ([]PullRequestActivity, error) {
+	// involves: catches PRs you opened or pushed to; author: alone misses collaborator work.
+	q := fmt.Sprintf("involves:%s type:pr updated:%s..%s", login, from, to)
 	opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 50}, Sort: "updated", Order: "desc"}
 
 	var results []PullRequestActivity
@@ -239,6 +393,11 @@ func (c *Client) searchPRs(ctx context.Context, login string, start, end time.Ti
 	}
 	for _, issue := range res.Issues {
 		if !issue.IsPullRequest() {
+			continue
+		}
+		created := issue.GetCreatedAt().Time
+		updated := issue.GetUpdatedAt().Time
+		if !inWindow(updated, start, end) && !inWindow(created, start, end) {
 			continue
 		}
 		repoURL := issue.GetRepositoryURL()
@@ -255,8 +414,8 @@ func (c *Client) searchPRs(ctx context.Context, login string, start, end time.Ti
 			RepoFull:  full,
 			RepoName:  name,
 			URL:       issue.GetHTMLURL(),
-			CreatedAt: issue.GetCreatedAt().Time,
-			UpdatedAt: issue.GetUpdatedAt().Time,
+			CreatedAt: created,
+			UpdatedAt: updated,
 		})
 	}
 	return results, nil
