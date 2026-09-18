@@ -377,6 +377,12 @@ func newActivityCmd() *cobra.Command {
 			if !cfg.IncludePersonalRepos {
 				fmt.Println("Filter: organization repos only (personal repos excluded)")
 			}
+			if len(act.Orgs) > 0 {
+				fmt.Printf("Orgs: %s\n", strings.Join(act.Orgs, ", "))
+			}
+			if len(act.CheckedRepos) > 0 {
+				fmt.Printf("Checked repos: %s\n", strings.Join(act.CheckedRepos, ", "))
+			}
 			fmt.Println()
 			fmt.Printf("COMMITS (%d) — primary source for the summary\n", len(act.Commits))
 			if len(act.Commits) == 0 {

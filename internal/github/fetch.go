@@ -94,10 +94,11 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 			continue
 		}
 		checked = append(checked, owner+"/"+name)
+		before := len(seen)
 		for _, cm := range c.commitsFromRepoEvents(ctx, owner, name, login, start, end) {
 			addCommit(cm)
 		}
-		for _, cm := range c.commitsFromRepoBranches(ctx, owner, name, login, emails, start, end) {
+		for _, cm := range c.commitsFromRepo(ctx, owner, name, login, emails, start, end, "") {
 			addCommit(cm)
 		}
 		for _, pr := range c.recentPRs(ctx, owner, name, start, end) {
@@ -108,6 +109,12 @@ func (c *Client) FetchDayActivity(ctx context.Context, day time.Time, opts Fetch
 			}
 			if hadCommit || inWindow(pr.CreatedAt, start, end) {
 				addPR(pr)
+			}
+		}
+		// Feature-branch work is invisible on the default branch; scan refs if needed.
+		if len(seen) == before {
+			for _, cm := range c.commitsFromRepoBranches(ctx, owner, name, login, emails, start, end) {
+				addCommit(cm)
 			}
 		}
 	}

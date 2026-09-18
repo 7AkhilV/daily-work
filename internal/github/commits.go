@@ -353,14 +353,14 @@ func (c *Client) candidateRepos(ctx context.Context, start time.Time) ([][2]stri
 		seen[key] = struct{}{}
 		out = append(out, [2]string{owner, name})
 	}
-	for _, pair := range c.recentlyPushedRepos(ctx, start) {
-		add(pair[0], pair[1])
-	}
 	orgs := c.orgLogins(ctx)
 	for _, org := range orgs {
 		for _, pair := range c.orgReposPushedSince(ctx, org, start) {
 			add(pair[0], pair[1])
 		}
+	}
+	for _, pair := range c.recentlyPushedRepos(ctx, start) {
+		add(pair[0], pair[1])
 	}
 	return out, orgs
 }
@@ -513,6 +513,9 @@ func commitByUser(item *github.RepositoryCommit, login string, emails map[string
 			return true
 		}
 		if item.Commit.Committer != nil && emails[strings.ToLower(item.Commit.Committer.GetEmail())] {
+			return true
+		}
+		if login != "" && item.Commit.Author != nil && strings.EqualFold(item.Commit.Author.GetName(), login) {
 			return true
 		}
 	}
