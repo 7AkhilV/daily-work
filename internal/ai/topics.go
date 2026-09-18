@@ -23,8 +23,8 @@ func BuildTopics(proc *activity.ProcessedActivity) []Topic {
 	}
 
 	type acc struct {
-		topic      Topic
-		hasCommit  bool
+		topic     Topic
+		hasCommit bool
 	}
 	order := []string{}
 	byKey := map[string]*acc{}

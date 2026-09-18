@@ -10,18 +10,8 @@ import (
 )
 
 func (c *Client) searchCommits(ctx context.Context, qualifier string, start, end time.Time) ([]CommitActivity, error) {
-	from, to := searchRange(start, end)
-	results, err := c.searchCommitsQuery(ctx, qualifier, from, to, start, end)
-	if err == nil {
-		return results, nil
-	}
-	// Some GitHub search backends only accept YYYY-MM-DD; still post-filter to local day.
-	from = start.UTC().Format("2006-01-02")
-	to = end.UTC().Add(-time.Second).Format("2006-01-02")
-	return c.searchCommitsQuery(ctx, qualifier, from, to, start, end)
-}
-
-func (c *Client) searchCommitsQuery(ctx context.Context, qualifier, from, to string, start, end time.Time) ([]CommitActivity, error) {
+	from := start.UTC().Format("2006-01-02")
+	to := end.UTC().Add(-time.Second).Format("2006-01-02")
 	q := fmt.Sprintf("%s author-date:%s..%s", qualifier, from, to)
 	if strings.HasPrefix(qualifier, "committer:") || strings.HasPrefix(qualifier, "committer-email:") {
 		q = fmt.Sprintf("%s committer-date:%s..%s", qualifier, from, to)
@@ -89,7 +79,7 @@ func (c *Client) commitsFromEvents(ctx context.Context, login string, start, end
 	})...)
 
 	// Private org pushes often do not show up on /users/{user}/events.
-	orgs, err := c.gh.Organizations.List(ctx, "", &github.ListOptions{PerPage: 100})
+	orgs, _, err := c.gh.Organizations.List(ctx, "", &github.ListOptions{PerPage: 100})
 	if err != nil {
 		return out
 	}
@@ -371,18 +361,10 @@ func (c *Client) commitFiles(ctx context.Context, owner, repo, sha string) ([]Fi
 }
 
 func (c *Client) searchPRs(ctx context.Context, login string, start, end time.Time) ([]PullRequestActivity, error) {
-	from, to := searchRange(start, end)
-	results, err := c.searchPRsQuery(ctx, login, from, to, start, end)
-	if err == nil {
-		return results, nil
-	}
-	from = start.UTC().Format("2006-01-02")
-	to = end.UTC().Add(-time.Second).Format("2006-01-02")
-	return c.searchPRsQuery(ctx, login, from, to, start, end)
-}
-
-func (c *Client) searchPRsQuery(ctx context.Context, login, from, to string, start, end time.Time) ([]PullRequestActivity, error) {
+	from := start.UTC().Format("2006-01-02")
+	to := end.UTC().Add(-time.Second).Format("2006-01-02")
 	// involves: catches PRs you opened or pushed to; author: alone misses collaborator work.
+	// Date-only search is UTC and can include yesterday in IST — inWindow trims that.
 	q := fmt.Sprintf("involves:%s type:pr updated:%s..%s", login, from, to)
 	opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 50}, Sort: "updated", Order: "desc"}
 
